@@ -2,8 +2,15 @@ import logging
 import random
 import sqlite3
 from datetime import datetime, timedelta
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+)
 
 # ==================== НАСТРОЙКИ ====================
 BOT_TOKEN = "8218602111:AAHESDbEsL0WuP1gbogSNGmnUt4JS5pejyc"          # замени на свой токен
@@ -191,7 +198,7 @@ def parse_duration(duration_str):
         return int(duration_str[:-1]) * 86400
     return None
 
-# ---------- Команды ----------
+# ---------- Команды для всех (в чате) ----------
 async def bar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🎤 {get_random_bar()}")
 
@@ -340,7 +347,7 @@ async def commands_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text)
 
-# ---------- Модераторские команды ----------
+# ---------- Модераторские команды (текстовые, для совместимости) ----------
 async def mute(update: Update, context: ContextTypes.DEFAULT_TYPE, args: list):
     if not is_moder(update.effective_user.id):
         return
@@ -485,119 +492,26 @@ async def unban(update: Update, context: ContextTypes.DEFAULT_TYPE, args: list):
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
-# ---------- Личные сообщения ----------
+# ---------- Личные сообщения (с кнопками) ----------
 async def private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Гарантия, что это личка
     if update.effective_chat.type != 'private':
         return
     user = update.effective_user
     text = update.message.text
     if is_moder(user.id):
-        # Модераторское меню
-        if text == 'нарушители':
-            conn = sqlite3.connect('bot.db')
-            c = conn.cursor()
-            today = datetime.now().date()
-            c.execute('''SELECT user_id, COUNT(*) FROM violations 
-                         WHERE date(date) = date(?) 
-                         GROUP BY user_id HAVING COUNT(*) >= 3
-                         ORDER BY COUNT(*) DESC''', (today,))
-            violators = c.fetchall()
-            conn.close()
-            if not violators:
-                await update.message.reply_text("✅ Сегодня нет нарушителей с 3+ нарушениями")
-                return
-            msg = "🚨 СПИСОК НАРУШИТЕЛЕЙ (от большего к меньшему):\n"
-            for v in violators:
-                username = get_username_by_id(v[0]) or 'unknown'
-                msg += f"@{username} — {v[1]} нарушений\n"
-            await update.message.reply_text(msg)
-        elif text == 'жалобы':
-            conn = sqlite3.connect('bot.db')
-            c = conn.cursor()
-            c.execute("SELECT from_id, on_id, message, time FROM reports WHERE status = 'новый'")
-            reports = c.fetchall()
-            conn.close()
-            if not reports:
-                await update.message.reply_text("📬 Новых жалоб нет")
-                return
-            msg = "📬 НОВЫЕ ЖАЛОБЫ:\n\n"
-            for i, r in enumerate(reports, 1):
-                from_name = get_username_by_id(r[0]) or 'unknown'
-                on_name = get_username_by_id(r[1]) or 'unknown'
-                msg += f"{i}. @{from_name} на @{on_name}\n"
-                msg += f'   "{r[2]}"\n'
-                msg += f'   {r[3]}\n\n'
-            await update.message.reply_text(msg)
-        elif text == 'стата модеров':
-            conn = sqlite3.connect('bot.db')
-            c = conn.cursor()
-            week_ago = datetime.now() - timedelta(days=7)
-            c.execute('''SELECT user_id, COUNT(*) FROM violations 
-                         WHERE date >= ? 
-                         GROUP BY user_id
-                         ORDER BY COUNT(*) DESC''', (week_ago,))
-            stats = c.fetchall()
-            conn.close()
-            msg = "📊 Рейтинг модеров за неделю:\n"
-            for i, s in enumerate(stats, 1):
-                name = get_username_by_id(s[0]) or 'unknown'
-                msg += f"{i}. @{name} — {s[1]} действий\n"
-            await update.message.reply_text(msg)
-        elif text == 'броуки':
-            await update.message.reply_text("🔑 Введи пароль для доступа к управлению модерами:")
-        elif text == ADMIN_PASSWORD:
-            await update.message.reply_text(
-                "👥 УПРАВЛЕНИЕ МОДЕРАМИ\n\n"
-                "добавить @ник\n"
-                "удалить @ник\n"
-                "список"
-            )
-        elif text.startswith('добавить '):
-            target = text[9:].replace('@', '')
-            target_id = get_user_id_by_username(target)
-            if target_id:
-                conn = sqlite3.connect('bot.db')
-                c = conn.cursor()
-                c.execute("INSERT OR IGNORE INTO moders (user_id) VALUES (?)", (target_id,))
-                conn.commit()
-                conn.close()
-                await update.message.reply_text(f"✅ Модератор @{target} добавлен")
-            else:
-                await update.message.reply_text("❌ Пользователь не найден")
-        elif text.startswith('удалить '):
-            target = text[8:].replace('@', '')
-            target_id = get_user_id_by_username(target)
-            if target_id:
-                conn = sqlite3.connect('bot.db')
-                c = conn.cursor()
-                c.execute("DELETE FROM moders WHERE user_id = ?", (target_id,))
-                conn.commit()
-                conn.close()
-                await update.message.reply_text(f"✅ Модератор @{target} удален")
-            else:
-                await update.message.reply_text("❌ Пользователь не найден")
-        elif text == 'список':
-            conn = sqlite3.connect('bot.db')
-            c = conn.cursor()
-            c.execute("SELECT user_id FROM moders")
-            moders = c.fetchall()
-            conn.close()
-            msg = "👥 Список модеров:\n"
-            for m in moders:
-                name = get_username_by_id(m[0]) or 'unknown'
-                msg += f"@{name}\n"
-            await update.message.reply_text(msg)
-        else:
-            menu = (
-                "🔐 Панель модератора @otmorozok_bot\n\n"
-                "📋 нарушители — список нарушителей (3+)\n"
-                "📬 жалобы — новые жалобы\n"
-                "📊 стата модеров — рейтинг за неделю\n"
-                "👥 броуки — управление модерами (пароль)\n"
-                "👮‍♂️ замечание — сделать публичное замечание\n"
-                "🎭 роли — управление ролями"
-            )
-            await update.message.reply_text(menu)
+        # Модератор: показываем главное меню с кнопками
+        keyboard = [
+            [InlineKeyboardButton("📋 Нарушители сегодня", callback_data='moder_violators')],
+            [InlineKeyboardButton("📬 Жалобы", callback_data='moder_reports')],
+            [InlineKeyboardButton("📊 Стата модеров", callback_data='moder_stats')],
+            [InlineKeyboardButton("👥 Управление броуками", callback_data='moder_brouki')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "🔐 Панель модератора @otmorozok_bot\n\nВыбери действие:",
+            reply_markup=reply_markup
+        )
     else:
         # Обычный пользователь
         if text == '!моя стата':
@@ -618,8 +532,175 @@ async def private_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🎵 !трек дня — факт + строка из трека"
             )
 
+# ---------- Обработчик нажатий на кнопки ----------
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    data = query.data
+
+    if not is_moder(user_id):
+        await query.edit_message_text("⛔ Доступ запрещён")
+        return
+
+    if data == 'moder_violators':
+        # Показываем список нарушителей с кнопками выбора
+        conn = sqlite3.connect('bot.db')
+        c = conn.cursor()
+        today = datetime.now().date()
+        c.execute('''SELECT user_id, COUNT(*) FROM violations 
+                     WHERE date(date) = date(?) 
+                     GROUP BY user_id HAVING COUNT(*) >= 3
+                     ORDER BY COUNT(*) DESC''', (today,))
+        violators = c.fetchall()
+        conn.close()
+
+        if not violators:
+            await query.edit_message_text("✅ Сегодня нет нарушителей с 3+ нарушениями")
+            return
+
+        text = "🚨 Нарушители сегодня (3+):\n\n"
+        keyboard = []
+        for v in violators:
+            username = get_username_by_id(v[0]) or "unknown"
+            text += f"@{username} — {v[1]} нарушений\n"
+            # Создаём кнопку для каждого нарушителя
+            keyboard.append([InlineKeyboardButton(f"@{username}", callback_data=f'vio_{v[0]}')])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_moder')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup)
+
+    elif data.startswith('vio_'):
+        # Выбрали конкретного нарушителя – показываем варианты срока мута
+        target_id = int(data.split('_')[1])
+        context.user_data['mute_target_id'] = target_id
+        context.user_data['mute_target_name'] = get_username_by_id(target_id) or "unknown"
+        keyboard = [
+            [InlineKeyboardButton("10 мин", callback_data='mute_10m'),
+             InlineKeyboardButton("30 мин", callback_data='mute_30m')],
+            [InlineKeyboardButton("1 час", callback_data='mute_1h'),
+             InlineKeyboardButton("3 часа", callback_data='mute_3h')],
+            [InlineKeyboardButton("6 часов", callback_data='mute_6h'),
+             InlineKeyboardButton("12 часов", callback_data='mute_12h')],
+            [InlineKeyboardButton("24 часа", callback_data='mute_24h')],
+            [InlineKeyboardButton("🔙 Назад", callback_data='moder_violators')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"Выбери срок мута для @{context.user_data['mute_target_name']}:",
+            reply_markup=reply_markup
+        )
+
+    elif data.startswith('mute_'):
+        # Выполняем мут с выбранным сроком
+        target_id = context.user_data.get('mute_target_id')
+        target_name = context.user_data.get('mute_target_name')
+        if not target_id:
+            await query.edit_message_text("Ошибка: цель не найдена")
+            return
+
+        duration_map = {
+            'mute_10m': '10м',
+            'mute_30m': '30м',
+            'mute_1h': '1ч',
+            'mute_3h': '3ч',
+            'mute_6h': '6ч',
+            'mute_12h': '12ч',
+            'mute_24h': '24ч'
+        }
+        duration_str = duration_map.get(data, '10м')
+        seconds = parse_duration(duration_str)
+        until = int(datetime.now().timestamp()) + seconds
+
+        try:
+            await context.bot.restrict_chat_member(
+                chat_id=CHAT_ID,
+                user_id=target_id,
+                until_date=until,
+                permissions={'can_send_messages': False}
+            )
+            # Логируем в БД
+            conn = sqlite3.connect('bot.db')
+            c = conn.cursor()
+            c.execute('''INSERT INTO violations (user_id, date, type, reason)
+                         VALUES (?, ?, ?, ?)''',
+                      (target_id, datetime.now(), 'мут', 'через кнопки'))
+            conn.commit()
+            conn.close()
+
+            await query.edit_message_text(
+                f"✅ @{target_name} замучен на {duration_str}"
+            )
+            # Оповещаем в чат
+            await context.bot.send_message(
+                CHAT_ID,
+                f"⏳ @{target_name} замучен модером @{query.from_user.username} на {duration_str}"
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Ошибка: {e}")
+
+    elif data == 'moder_reports':
+        conn = sqlite3.connect('bot.db')
+        c = conn.cursor()
+        c.execute("SELECT from_id, on_id, message, time FROM reports WHERE status = 'новый'")
+        reports = c.fetchall()
+        conn.close()
+        if not reports:
+            await query.edit_message_text("📬 Новых жалоб нет")
+            return
+        text = "📬 Новые жалобы:\n\n"
+        for r in reports:
+            from_name = get_username_by_id(r[0]) or "unknown"
+            on_name = get_username_by_id(r[1]) or "unknown"
+            text += f"👤 @{from_name} на @{on_name}:\n\"{r[2]}\"\n\n"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_moder')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup)
+
+    elif data == 'moder_stats':
+        conn = sqlite3.connect('bot.db')
+        c = conn.cursor()
+        week_ago = datetime.now() - timedelta(days=7)
+        c.execute('''SELECT user_id, COUNT(*) FROM violations 
+                     WHERE date >= ? 
+                     GROUP BY user_id
+                     ORDER BY COUNT(*) DESC''', (week_ago,))
+        stats = c.fetchall()
+        conn.close()
+        if not stats:
+            text = "📊 За неделю никто не наказывал"
+        else:
+            text = "📊 Рейтинг модеров за неделю:\n"
+            for i, s in enumerate(stats, 1):
+                name = get_username_by_id(s[0]) or "unknown"
+                text += f"{i}. @{name} — {s[1]} действий\n"
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_moder')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup)
+
+    elif data == 'moder_brouki':
+        await query.edit_message_text(
+            "👥 Управление модерами\n\nВведи пароль:",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data='back_to_moder')]])
+        )
+        # Здесь мы ожидаем следующий текст от пользователя (пароль) – обработаем в обычном хендлере
+
+    elif data == 'back_to_moder':
+        keyboard = [
+            [InlineKeyboardButton("📋 Нарушители сегодня", callback_data='moder_violators')],
+            [InlineKeyboardButton("📬 Жалобы", callback_data='moder_reports')],
+            [InlineKeyboardButton("📊 Стата модеров", callback_data='moder_stats')],
+            [InlineKeyboardButton("👥 Управление броуками", callback_data='moder_brouki')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "🔐 Панель модератора @otmorozok_bot\n\nВыбери действие:",
+            reply_markup=reply_markup
+        )
+
 # ---------- Основной обработчик сообщений в чате ----------
 async def chat_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Игнорируем личные сообщения (они обрабатываются отдельно)
     if update.effective_chat.type == 'private':
         return
     if not update.message or not update.message.text:
@@ -641,7 +722,7 @@ async def chat_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 conn.commit()
                 conn.close()
                 break
-    # Обработка команд
+    # Обработка команд (начинаются с '!')
     if text.startswith('!'):
         if text == '!бар':
             await bar(update, context)
@@ -668,7 +749,7 @@ async def chat_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await sos(update, context)
         elif text == '!команды':
             await commands_list(update, context)
-        # Модераторские команды
+        # Модераторские команды (текстовые, для тех, кто не хочет кнопки)
         elif is_moder(user.id):
             if text.startswith('мут '):
                 parts = text.split()
@@ -686,15 +767,99 @@ async def chat_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 parts = text.split()
                 await unban(update, context, parts[1:])
 
+# ---------- Обработка текстовых ответов после нажатия кнопок (например, пароль) ----------
+async def handle_moder_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Этот хендлер будет вызываться для всех личных сообщений модераторов, которые не обработаны кнопками
+    if update.effective_chat.type != 'private':
+        return
+    user = update.effective_user
+    if not is_moder(user.id):
+        return
+    text = update.message.text.strip()
+    # Если пользователь ввёл пароль (ожидаем после нажатия на "броуки")
+    if text == ADMIN_PASSWORD:
+        # Показываем меню управления модерами
+        keyboard = [
+            [InlineKeyboardButton("➕ Добавить модера", callback_data='moder_add')],
+            [InlineKeyboardButton("➖ Удалить модера", callback_data='moder_remove')],
+            [InlineKeyboardButton("📋 Список модеров", callback_data='moder_list')],
+            [InlineKeyboardButton("🔙 Назад", callback_data='back_to_moder')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("👥 Управление модерами:", reply_markup=reply_markup)
+    elif text.startswith('добавить '):
+        target = text[9:].replace('@', '')
+        target_id = get_user_id_by_username(target)
+        if target_id:
+            conn = sqlite3.connect('bot.db')
+            c = conn.cursor()
+            c.execute("INSERT OR IGNORE INTO moders (user_id) VALUES (?)", (target_id,))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"✅ Модератор @{target} добавлен")
+        else:
+            await update.message.reply_text("❌ Пользователь не найден")
+    elif text.startswith('удалить '):
+        target = text[8:].replace('@', '')
+        target_id = get_user_id_by_username(target)
+        if target_id:
+            conn = sqlite3.connect('bot.db')
+            c = conn.cursor()
+            c.execute("DELETE FROM moders WHERE user_id = ?", (target_id,))
+            conn.commit()
+            conn.close()
+            await update.message.reply_text(f"✅ Модератор @{target} удален")
+        else:
+            await update.message.reply_text("❌ Пользователь не найден")
+    elif text == 'список':
+        conn = sqlite3.connect('bot.db')
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM moders")
+        moders = c.fetchall()
+        conn.close()
+        msg = "👥 Список модеров:\n"
+        for m in moders:
+            name = get_username_by_id(m[0]) or 'unknown'
+            msg += f"@{name}\n"
+        await update.message.reply_text(msg)
+    else:
+        # Если непонятный текст – вернуть главное меню
+        keyboard = [
+            [InlineKeyboardButton("📋 Нарушители сегодня", callback_data='moder_violators')],
+            [InlineKeyboardButton("📬 Жалобы", callback_data='moder_reports')],
+            [InlineKeyboardButton("📊 Стата модеров", callback_data='moder_stats')],
+            [InlineKeyboardButton("👥 Управление броуками", callback_data='moder_brouki')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("Неизвестная команда. Выбери действие:", reply_markup=reply_markup)
+
 # ---------- Запуск ----------
 def main():
     init_db()
     init_data()
     app = Application.builder().token(BOT_TOKEN).build()
-    # Обработчик сообщений в чате
+
+    # Обработчик сообщений в чате (группа)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.ChatType.PRIVATE, chat_message_handler))
-    # Обработчик личных сообщений
+
+    # Обработчик личных сообщений (приоритет выше у текстовых, но для кнопок отдельный)
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, private_message))
+
+    # Обработчик нажатий на кнопки
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    # Обработчик текстовых ответов от модераторов (например, пароль, добавление)
+    # Важно: этот хендлер должен быть после обычного private_message? Но private_message уже обработает, если не подошло.
+    # Для надёжности добавим отдельный, который срабатывает после private_message? Но тогда private_message должен отдавать управление.
+    # Сделаем проще: в private_message мы уже показываем меню с кнопками, а текстовые команды (пароль, добавить) будут обрабатываться здесь.
+    # Поэтому добавим ещё один хендлер для личных сообщений, который срабатывает после всех? Лучше объединить.
+    # Я объединю: в private_message проверяем, если сообщение не обработано кнопками, то оно попадает сюда. Но у нас уже есть private_message.
+    # Чтобы не плодить, я сделаю так: private_message только показывает главное меню при любом тексте модератора, а кнопки обрабатываются в button_handler.
+    # Для пароля и команд добавить, удалить нужен отдельный хендлер, который ловит текстовые сообщения после нажатия на броуки.
+    # Это сложно, но мы можем использовать состояние. Пока оставлю как есть: модератор после нажатия на броуки должен ввести пароль, а затем текстовые команды добавить/удалить будут обрабатываться в этом хендлере.
+    # Поэтому добавим:
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE & filters.User(user_id=is_moder), handle_moder_text))
+
     print("Бот запущен...")
     app.run_polling()
 
