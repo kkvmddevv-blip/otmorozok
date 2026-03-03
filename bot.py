@@ -692,9 +692,9 @@ def main():
     init_data()
     app = Application.builder().token(BOT_TOKEN).build()
     # Обработчик сообщений в чате
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.PRIVATE, chat_message_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.ChatType.PRIVATE, chat_message_handler))
     # Обработчик личных сообщений
-    app.add_handler(MessageHandler(filters.TEXT & filters.PRIVATE, private_message))
+    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, private_message))
     print("Бот запущен...")
     app.run_polling()
 
